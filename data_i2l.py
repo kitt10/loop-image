@@ -1,27 +1,18 @@
-from transformers import AutoImageProcessor, AutoFeatureExtractor, YolosFeatureExtractor, YolosModel
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
 from PIL import Image
 from glob import glob
 from os.path import join
-from img2vec_pytorch import Img2Vec
 import torch.nn.functional as F
 import numpy as np
 import torch
 
-img2vec = Img2Vec(cuda=False)
-
 IMG_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif', '.tiff', '.webp')
+
 
 def pil_loader(path):
     with open(path, 'rb') as f:
         img = Image.open(f)
         return img.convert('RGB')
-
-def path2vec(path):
-    vec = img2vec.get_vec(pil_loader(path), tensor=True)
-    
-    return vec.flatten().numpy()
 
 def load_image_data(dataset_path, from_zero=True, train_labels=['mug', 'ball']):
     data = {
@@ -140,6 +131,86 @@ class I2LData:
         self.data[group]['labels'].append(label)
         self.data[group]['targets'].append(self.labels.index(label))
     
+    def loader(self, group, batch_size=16):
+        return DataLoader(dataset=I2LDataset(
+            x=self.x[group],
+            y=self.y[group],
+            samples=self.data[group]['samples'],
+            labels=self.data[group]['labels']
+        ), batch_size=batch_size, shuffle=True)
+    
+
+def load_intel_data(dataset_path):
+    data = {
+        'train': {'samples': [], 'labels': []},
+        'dev': {'samples': [], 'labels': []},
+        'test': {'samples': [], 'labels': []},
+    }
+
+    lims = {'train': 50, 'test': 300, 'dev': 20}
+
+    for group in data.keys():
+        for img_path in glob(join(dataset_path, group, '*', '*.jpg')):
+            label = img_path.split('/')[-2]
+            
+            if data[group]['labels'].count(label) < lims[group]:
+                data[group]['samples'].append(img_path)
+                data[group]['labels'].append(label)
+
+        print(f'# Intel {group} samples: {len(data[group]["samples"])}')
+
+    return data
+
+class IntelData:
+
+    def __init__(self, net, data):
+        self.net = net
+        self.data = data
+
+        self.labels = None
+        self.target2label = None
+        self.n = None
+        self.m = None
+        self.pt = None
+        self.pk = None
+        self.x = {'train': None, 'dev': None, 'test': None}
+        self.y = {'train': None, 'dev': None, 'test': None}
+        self.init_data()
+
+    def init_data(self):
+        self.labels = sorted(list(set(self.data['test']['labels'])))
+        self.target2label = {target:label for target, label in enumerate(self.labels)}
+
+        self.data['train']['targets'] = [self.labels.index(label) for label in self.data['train']['labels']]
+        self.data['dev']['targets'] = [self.labels.index(label) for label in self.data['dev']['labels']]
+        self.data['test']['targets'] = [self.labels.index(label) for label in self.data['test']['labels']]
+        
+        self.data['train']['encodings'] = self.encode_samples(self.data['train']['samples'])
+        self.data['dev']['encodings'] = self.encode_samples(self.data['dev']['samples'])
+        self.data['test']['encodings'] = self.encode_samples(self.data['test']['samples'])
+
+        self.pt = len(self.data['train']['samples'])
+        self.pk = len(self.data['test']['samples'])
+
+        self.make_pairs(('test', 'dev', 'train'))
+
+        self.n = len(self.x['test'][0])
+        self.m = len(self.labels)
+
+        print(f'Data initialized: n = {self.n}, m = {self.m}, pt = {self.pt}, pk = {self.pk}, labels: {self.target2label}')
+
+    def encode_samples(self, s_):
+        return np.array([self.net.encode(s) for s in s_], ndmin=2)
+    
+    def make_pairs(self, groups):
+        for group in groups:
+            if len(self.data[group]['samples']) > 0:
+                self.x[group] = torch.from_numpy(self.data[group]['encodings'].reshape(-1, self.data[group]['encodings'].shape[1]).astype('float32'))
+                self.y[group] = torch.tensor(self.data[group]['targets'])
+            else:
+                self.x[group] = torch.tensor([])
+                self.y[group] = torch.tensor([])
+
     def loader(self, group, batch_size=16):
         return DataLoader(dataset=I2LDataset(
             x=self.x[group],

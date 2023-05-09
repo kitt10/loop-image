@@ -15,8 +15,8 @@ def set_seed(seed):
 class Net(ABC):
 
     def __init__(self, seed=42):
-        #set_seed(seed)
-        pass
+        set_seed(seed)
+        #pass
 
     @abstractmethod
     def predict(self, x):

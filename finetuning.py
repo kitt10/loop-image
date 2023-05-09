@@ -34,8 +34,7 @@ class T5FineTuner:
 
         self.hparams = dict(
             learning_rate=3e-4,
-            adam_epsilon=1e-8,
-            patience=30
+            adam_epsilon=1e-8
         )
 
         self.optimizer = AdamW(self.net.model.parameters(), lr=self.hparams['learning_rate'], eps=self.hparams['adam_epsilon'])
@@ -47,7 +46,7 @@ class T5FineTuner:
     def match_criterion(self, hyp, ref, decode):
         return match(hyp, ref, decode)['W_Err']
 
-    def fit(self, trainloader, devloader=None, epochs=10, verbose=True):
+    def fit(self, trainloader, devloader=None, epochs=10, patience=10, verbose=True):
         train_loss_list = []
         dev_loss_list = []
 
@@ -101,16 +100,16 @@ class T5FineTuner:
             train_loss_list.append(mean_train_loss)
             dev_loss_list.append(mean_dev_loss)
             
-            if verbose > 0 and epoch % 10 == 0:
+            if verbose and epoch % 10 == 0:
                 print(f'epoch {epoch}, train loss {mean_train_loss}, dev loss {mean_dev_loss}')
 
-            if len(dev_loss_list) > self.hparams['patience'] and all([dl < mean_dev_loss for dl in dev_loss_list[-self.hparams['patience']:-1]]):
-                print(f'Early stopping, dev_loss tail: {dev_loss_list[-self.hparams["patience"]:-1]}')
+            if len(dev_loss_list) > patience and all([dl < mean_dev_loss for dl in dev_loss_list[-patience:-1]]):
+                print(f'Early stopping, dev_loss tail: {dev_loss_list[-patience:-1]}')
                 break
 
         print(f'Final train loss: {train_loss_list[-1].item()}, dev loss: {dev_loss_list[-1].item()}')
 
-        return train_loss_list, dev_loss_list
+        return train_loss_list, dev_loss_list, epoch
 
 
 class T2LFineTuner:
@@ -206,8 +205,7 @@ class I2LFineTuner:
         self.net = net
 
         self.hparams = dict(
-            learning_rate=0.001,
-            patience=15
+            learning_rate=0.001
         )
 
         # Loss function
@@ -221,7 +219,7 @@ class I2LFineTuner:
         else:
             self.optimizer = AdamW(self.net.model.parameters(), lr=self.hparams['learning_rate'])
 
-    def fit(self, trainloader, devloader=None, epochs=10, verbose=True):
+    def fit(self, trainloader, devloader=None, epochs=1000, patience=10, verbose=True):
         train_loss_list = []
         dev_loss_list = []
         print(f'Finetuning {epochs} epochs...', end='\r')
@@ -272,14 +270,14 @@ class I2LFineTuner:
             train_loss_list.append(mean_train_loss)
             dev_loss_list.append(mean_dev_loss)
             
-            if verbose and epoch % 1 == 0:
+            if verbose and epoch % 100 == 0:
                 print(f'epoch {epoch}, train loss {mean_train_loss}, dev loss {mean_dev_loss}')
 
-            if len(dev_loss_list) > self.hparams['patience'] and all([dl < mean_dev_loss for dl in dev_loss_list[-self.hparams['patience']:-1]]):
+            if len(dev_loss_list) > patience and all([dl < mean_dev_loss for dl in dev_loss_list[-patience:-1]]):
                 if verbose:
-                    print(f'Early stopping, dev_loss tail: {dev_loss_list[-self.hparams["patience"]:-1]}')
+                    print(f'Early stopping, dev_loss tail: {dev_loss_list[-patience:-1]}')
                 break
 
         print(f'Final train loss: {train_loss_list[-1].item()}, dev loss: {dev_loss_list[-1].item()}')
 
-        return train_loss_list, dev_loss_list
+        return train_loss_list, dev_loss_list, epoch
